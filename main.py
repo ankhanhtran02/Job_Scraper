@@ -1,12 +1,12 @@
 import json
+import math
 import datetime
 import os
+import re
 from dotenv import load_dotenv
 from serpapi import GoogleSearch
 
 load_dotenv()  # loads SERPAPI_KEY from .env file
-
-OUTPUT_FILE_DIR = "job_scrape_master.json"
 
 
 class TimeKeeper:
@@ -16,7 +16,7 @@ class TimeKeeper:
 
 
 def format_job(raw, timekeeper):
-    """Normalise a SerpAPI job result into the original output schema."""
+    """Normalise a SerpAPI job result into the output schema."""
     extensions = raw.get("detected_extensions", {})
     highlights = raw.get("job_highlights", [])
 
@@ -48,112 +48,137 @@ def format_job(raw, timekeeper):
     }
 
 
-def build_params(q, api_key, location=None, is_today=False, hl="en", gl=None, next_page_token=None):
-    params = {
-        "engine": "google_jobs",
-        "q": q,
-        "api_key": api_key,
-        "hl": hl,
-    }
-    if gl:
-        params["gl"] = gl
-    if location:
-        params["location"] = location
-    if is_today:
-        params["chips"] = "date_posted:today"
-    if next_page_token:
-        params["next_page_token"] = next_page_token
-    return params
+OUTPUT_DIR = "output"
 
 
-def fetch_page(params):
-    search = GoogleSearch(params)
-    results = search.get_dict()
-    error = results.get("error", "")
-    jobs = results.get("jobs_results", [])
-    next_page_token = results.get("serpapi_pagination", {}).get("next_page_token")
-    return jobs, error, next_page_token
+def make_output_filename(search_term, city_state):
+    """Build a filepath like: output/data_scientist_Hanoi_2026-02-27_14-30.json"""
+    parts = [search_term]
+    if city_state:
+        parts.append(city_state)
+    slug = "_".join(parts)
+    slug = re.sub(r"[^\w\s-]", "", slug)   # strip special chars
+    slug = re.sub(r"[\s]+", "_", slug.strip())
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    return os.path.join(OUTPUT_DIR, f"{slug}_{timestamp}.json")
 
 
 def scrape_jobs(search_term, limit, is_today, city_state, api_key, hl="en", gl=None):
     timekeeper = TimeKeeper()
+
+    # Round limit UP to the nearest multiple of 10
+    pages_needed = math.ceil(limit / 10)
+    target = pages_needed * 10
+
+    # SerpAPI's google_jobs engine reliably returns only ~10 results per query;
+    # next_page_token consistently fails on page 2 regardless of params.
+    # Workaround: run multiple queries with different date-range chips to
+    # accumulate up to `target` unique results (deduplicated by title+company).
+    date_chips = (
+        ["date_posted:today"]
+        if is_today
+        else ["date_posted:today", "date_posted:3days",
+              "date_posted:week", "date_posted:month", ""]
+    )
+
+    # For each chip, try with city embedded in q first (page 1 geo-filter),
+    # then fall back to plain q if that yields nothing.
+    def queries_for_chip(chip):
+        if city_state:
+            yield (f"q='{search_term} {city_state}', chips='{chip}'",
+                   f"{search_term} {city_state}", chip)
+            yield (f"q='{search_term}', chips='{chip}'",
+                   search_term, chip)
+        else:
+            yield (f"q='{search_term}', chips='{chip}'",
+                   search_term, chip)
+
+    search_url = (
+        f"https://www.google.com/search?q={search_term}&ibp=htl;jobs"
+        + (f"&htichips=city;{city_state}" if city_state else "")
+    )
+
+    print(f"Searching Google Jobs for: '{search_term}'"
+          + (f" in {city_state}" if city_state else ""))
+    print(f"Requested limit: {limit}  →  collecting up to {target} unique results")
+
+    seen = set()        # deduplicate by (title, company)
     scraped_jobs = []
-    jobs_per_page = 10
+    last_next_page_token = None
 
-    strategies = []
-    if city_state:
-        strategies.append({
-            "label": f"location='{city_state}'",
-            "q": search_term,
-            "location": city_state,
-        })
-        strategies.append({
-            "label": f"q embedded ('{search_term} {city_state}')",
-            "q": f"{search_term} {city_state}",
-            "location": None,
-        })
-    else:
-        strategies.append({
-            "label": "no location filter",
-            "q": search_term,
-            "location": None,
-        })
+    for chip in date_chips:
+        for label, q, chip_val in queries_for_chip(chip):
+            if len(scraped_jobs) >= target:
+                break
 
-    search_url = f"https://www.google.com/search?q={search_term}&ibp=htl;jobs"
-    if city_state:
-        search_url += f"&htichips=city;{city_state}"
+            params = {
+                "engine": "google_jobs",
+                "q": q,
+                "hl": hl,
+                "api_key": api_key,
+            }
+            if gl:
+                params["gl"] = gl
+            if chip_val:
+                params["chips"] = chip_val
 
-    print(f"Searching Google Jobs for: '{search_term}'" + (f" in {city_state}" if city_state else ""))
-
-    for strategy in strategies:
-        print(f"  Trying strategy: {strategy['label']} ...")
-        strategy_jobs = []
-        next_page_token = None
-        page_num = 1
-
-        while len(strategy_jobs) < limit:
-            params = build_params(
-                q=strategy["q"],
-                api_key=api_key,
-                location=strategy["location"],
-                is_today=is_today,
-                hl=hl,
-                gl=gl,
-                next_page_token=next_page_token,
-            )
-            jobs, error, next_page_token = fetch_page(params)
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            error = results.get("error", "")
+            jobs = results.get("jobs_results", [])
+            token = results.get("serpapi_pagination", {}).get("next_page_token")
 
             if error:
-                print(f"    SerpAPI error: {error}")
-                break
-
+                print(f"  [{label}] error: {error}")
+                continue
             if not jobs:
-                print(f"    No more results on page {page_num}.")
-                break
+                print(f"  [{label}] no results")
+                continue
 
+            added = 0
             for job in jobs:
-                if len(strategy_jobs) >= limit:
+                if len(scraped_jobs) >= target:
                     break
-                strategy_jobs.append(format_job(job, timekeeper))
+                key = (job.get("title", ""), job.get("company_name", ""))
+                if key not in seen:
+                    seen.add(key)
+                    scraped_jobs.append(format_job(job, timekeeper))
+                    added += 1
 
-            print(f"    Page {page_num}: {len(jobs)} jobs (strategy total: {len(strategy_jobs)})")
+            last_next_page_token = token
+            print(f"  [{label}] {len(jobs)} results, {added} new (total unique: {len(scraped_jobs)})")
 
-            if not next_page_token or len(jobs) < jobs_per_page:
-                break
-            page_num += 1
-
-        if strategy_jobs:
-            scraped_jobs = strategy_jobs
-            print(f"  ✓ Strategy succeeded with {len(scraped_jobs)} jobs.")
+        if len(scraped_jobs) >= target:
             break
-        else:
-            print(f"  ✗ Strategy returned no results, trying next...")
 
-    output_data = {"search_page_url": search_url, "jobs": scraped_jobs}
-    with open(OUTPUT_FILE_DIR, "w") as outfile:
-        json.dump(output_data, outfile, indent=4)
+    # Build output filename and metadata
+    output_filename = make_output_filename(search_term, city_state)
 
-    print(f"\nDone. {len(scraped_jobs)} jobs saved to {OUTPUT_FILE_DIR}")
+    resume_params = {
+        "engine": "google_jobs",
+        "q": f"{search_term} {city_state}" if city_state else search_term,
+        "hl": hl,
+    }
+    if gl:
+        resume_params["gl"] = gl
+    if last_next_page_token:
+        resume_params["next_page_token"] = last_next_page_token
+
+    output_data = {
+        "search_term": search_term,
+        "location": city_state or None,
+        "search_page_url": search_url,
+        "query_params": resume_params,
+        "total_jobs": len(scraped_jobs),
+        "last_next_page_token": last_next_page_token,
+        "jobs": scraped_jobs,
+    }
+
+    with open(output_filename, "w", encoding="utf-8") as outfile:
+        json.dump(output_data, outfile, indent=4, ensure_ascii=False)
+
+    print(f"\nDone. {len(scraped_jobs)} jobs saved to '{output_filename}'")
     return scraped_jobs
 
 
@@ -166,28 +191,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape Google Jobs via SerpAPI")
     parser.add_argument("--search_term", type=str, required=True,
                         help="Job title / keywords to search for")
-    parser.add_argument("--limit", type=int, default=50,
-                        help="Maximum number of jobs to scrape")
+    parser.add_argument("--limit", type=int, default=10,
+                        help="Number of jobs to scrape (rounded up to next multiple of 10)")
     parser.add_argument("--is_today", action="store_true",
                         help="Only include jobs posted today")
     parser.add_argument("--city_state", type=str, default=None,
                         help="Location to filter by (e.g. 'Hanoi' or 'New York, NY')")
     parser.add_argument("--hl", type=str, default="en",
-                        help="Language code for results (default: en). Use 'vi' for Vietnamese.")
+                        help="Language code (default: en). Use 'vi' for Vietnamese.")
     parser.add_argument("--gl", type=str, default=None,
                         help="Country code (e.g. 'vn' for Vietnam, 'us' for USA)")
     parser.add_argument("--api_key", type=str,
                         default=os.environ.get("SERPAPI_KEY", ""),
-                        help="SerpAPI key (or set SERPAPI_KEY env var). "
-                             "Get a free key at https://serpapi.com/users/sign_up")
+                        help="SerpAPI key (or set SERPAPI_KEY in .env)")
 
     args = parser.parse_args()
 
     if not args.api_key:
         parser.error(
-            "SerpAPI key required. Pass --api_key=YOUR_KEY or set the SERPAPI_KEY "
-            "environment variable.\nGet a free key (100 searches/month) at "
-            "https://serpapi.com/users/sign_up"
+            "SerpAPI key required. Pass --api_key=YOUR_KEY or add SERPAPI_KEY to .env\n"
+            "Get a free key (100 searches/month) at https://serpapi.com/users/sign_up"
         )
 
     scrape_jobs(
