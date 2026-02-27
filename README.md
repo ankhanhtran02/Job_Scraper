@@ -13,7 +13,7 @@ This Python script scrapes job postings from Google Jobs using the [SerpAPI](htt
 
 - Python 3.6+
 - pip (Python package manager)
-- A free [SerpAPI](https://serpapi.com/users/sign_up) key (100 searches/month on the free tier)
+- A free [SerpAPI](https://serpapi.com/users/sign_up) key (250 searches/month on the free tier)
 
 ## Installation
 
@@ -25,8 +25,6 @@ Start by cloning the repository to your local machine:
 git clone https://github.com/ankhanhtran02/Job_Scraper.git
 cd google_jobs_scraper
 ```
-
-Replace `https://github.com/ankhanhtran02/Job_Scraper.git` with the actual URL of your repository and `google_jobs_scraper` with the name of the folder where you cloned the repository.
 
 ### 2. Create a Virtual Environment (Optional but Recommended)
 
@@ -62,7 +60,6 @@ Get a free key at <https://serpapi.com/users/sign_up>, then add it to a `.env` f
 echo 'SERPAPI_KEY=your_key_here' > .env
 ```
 
-The `.env` file is automatically loaded by `main.py` — no need to export anything or pass `--api_key` at runtime. It is already excluded from git via `.gitignore`.
 
 ## Usage
 
@@ -78,7 +75,7 @@ python main.py --search_term="Your Search Term" --limit=50 --city_state "City"
 |---|---|---|
 | `--search_term` | *(required)* | Job title / keywords |
 | `--limit` | `50` | Max number of jobs to fetch |
-| `--city_state` | — | Location (e.g. `"Hanoi"`, `"New York, NY"`) |
+| `--city_state` | — | Location (e.g. `"Hà Nội"`, `"Hồ Chí Minh"`) |
 | `--is_today` | `False` | Only return jobs posted today |
 | `--hl` | `en` | Language code (`vi` for Vietnamese, etc.) |
 | `--gl` | — | Country code (`vn`, `us`, …) |
@@ -87,13 +84,13 @@ python main.py --search_term="Your Search Term" --limit=50 --city_state "City"
 ### Examples
 
 ```bash
-# English search, no location filter
-python main.py --search_term="data scientist" --limit=100
+# Jobs in Hanoi posted from the last month until now
+python main.py --search_term="data scientist" --limit=20 --city_state "Hà Nội" 
 
-# Vietnamese internships in Hanoi
-python main.py --search_term="thực tập sinh" --limit=50 --city_state "Hà Nội" --hl=vi
+# Jobs in Hanoi posted today
+python main.py --search_term="data scientist" --limit=20 --city_state "Hà Nội"  --is_today
 ```
 
 ## Output
 
-The script saves the scraped job postings in a JSON file named `job_scrape_master.json` in the project directory.
+The script saves the scraped job postings in the `output/` directory.

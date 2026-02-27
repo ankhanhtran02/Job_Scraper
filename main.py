@@ -3,8 +3,10 @@ import math
 import datetime
 import os
 import re
+import time
 from dotenv import load_dotenv
 from serpapi import GoogleSearch
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 load_dotenv()  # loads SERPAPI_KEY from .env file
 
@@ -50,6 +52,22 @@ def format_job(raw, timekeeper):
 
 OUTPUT_DIR = "output"
 
+MAX_RETRIES = 3
+RETRY_DELAY = 5   # seconds between retries
+
+
+def _get_dict_with_retry(params):
+    """Call SerpAPI with automatic retry on transient connection errors."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return GoogleSearch(params).get_dict()
+        except RequestsConnectionError as exc:
+            if attempt == MAX_RETRIES:
+                raise
+            print(f"  Network error (attempt {attempt}/{MAX_RETRIES}): {exc}. "
+                  f"Retrying in {RETRY_DELAY}s…")
+            time.sleep(RETRY_DELAY)
+
 
 def make_output_filename(search_term, city_state):
     """Build a filepath like: output/data_scientist_Hanoi_2026-02-27_14-30.json"""
@@ -82,17 +100,11 @@ def scrape_jobs(search_term, limit, is_today, city_state, api_key, hl="en", gl=N
               "date_posted:week", "date_posted:month", ""]
     )
 
-    # For each chip, try with city embedded in q first (page 1 geo-filter),
-    # then fall back to plain q if that yields nothing.
+    # Always embed the city in the query so SerpAPI geo-filters correctly.
+    # Never fall back to a plain q without location — that returns global results.
     def queries_for_chip(chip):
-        if city_state:
-            yield (f"q='{search_term} {city_state}', chips='{chip}'",
-                   f"{search_term} {city_state}", chip)
-            yield (f"q='{search_term}', chips='{chip}'",
-                   search_term, chip)
-        else:
-            yield (f"q='{search_term}', chips='{chip}'",
-                   search_term, chip)
+        q = f"{search_term} {city_state}" if city_state else search_term
+        yield (f"q='{q}', chips='{chip}'", q, chip)
 
     search_url = (
         f"https://www.google.com/search?q={search_term}&ibp=htl;jobs"
@@ -123,8 +135,7 @@ def scrape_jobs(search_term, limit, is_today, city_state, api_key, hl="en", gl=N
             if chip_val:
                 params["chips"] = chip_val
 
-            search = GoogleSearch(params)
-            results = search.get_dict()
+            results = _get_dict_with_retry(params)
             error = results.get("error", "")
             jobs = results.get("jobs_results", [])
             token = results.get("serpapi_pagination", {}).get("next_page_token")
@@ -210,7 +221,7 @@ if __name__ == "__main__":
     if not args.api_key:
         parser.error(
             "SerpAPI key required. Pass --api_key=YOUR_KEY or add SERPAPI_KEY to .env\n"
-            "Get a free key (100 searches/month) at https://serpapi.com/users/sign_up"
+            "Get a free key (250 searches/month) at https://serpapi.com/users/sign_up"
         )
 
     scrape_jobs(
