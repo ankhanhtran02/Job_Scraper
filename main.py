@@ -1,7 +1,10 @@
 import json
 import datetime
 import os
+from dotenv import load_dotenv
 from serpapi import GoogleSearch
+
+load_dotenv()  # loads SERPAPI_KEY from .env file
 
 OUTPUT_FILE_DIR = "job_scrape_master.json"
 
@@ -152,3 +155,47 @@ def scrape_jobs(search_term, limit, is_today, city_state, api_key, hl="en", gl=N
 
     print(f"\nDone. {len(scraped_jobs)} jobs saved to {OUTPUT_FILE_DIR}")
     return scraped_jobs
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Scrape Google Jobs via SerpAPI")
+    parser.add_argument("--search_term", type=str, required=True,
+                        help="Job title / keywords to search for")
+    parser.add_argument("--limit", type=int, default=50,
+                        help="Maximum number of jobs to scrape")
+    parser.add_argument("--is_today", action="store_true",
+                        help="Only include jobs posted today")
+    parser.add_argument("--city_state", type=str, default=None,
+                        help="Location to filter by (e.g. 'Hanoi' or 'New York, NY')")
+    parser.add_argument("--hl", type=str, default="en",
+                        help="Language code for results (default: en). Use 'vi' for Vietnamese.")
+    parser.add_argument("--gl", type=str, default=None,
+                        help="Country code (e.g. 'vn' for Vietnam, 'us' for USA)")
+    parser.add_argument("--api_key", type=str,
+                        default=os.environ.get("SERPAPI_KEY", ""),
+                        help="SerpAPI key (or set SERPAPI_KEY env var). "
+                             "Get a free key at https://serpapi.com/users/sign_up")
+
+    args = parser.parse_args()
+
+    if not args.api_key:
+        parser.error(
+            "SerpAPI key required. Pass --api_key=YOUR_KEY or set the SERPAPI_KEY "
+            "environment variable.\nGet a free key (100 searches/month) at "
+            "https://serpapi.com/users/sign_up"
+        )
+
+    scrape_jobs(
+        search_term=args.search_term,
+        limit=args.limit,
+        is_today=args.is_today,
+        city_state=args.city_state,
+        api_key=args.api_key,
+        hl=args.hl,
+        gl=args.gl,
+    )

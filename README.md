@@ -1,6 +1,6 @@
 # Google Jobs Scraper
 
-This Python script automates the process of scraping job postings from Google Jobs based on specified search terms. It leverages the Playwright library to interact with web pages, parse job details, and extract application links.
+This Python script scrapes job postings from Google Jobs using the [SerpAPI](https://serpapi.com) Google Jobs engine. It extracts structured job details and saves them to a JSON file.
 
 ## Features
 
@@ -13,6 +13,7 @@ This Python script automates the process of scraping job postings from Google Jo
 
 - Python 3.6+
 - pip (Python package manager)
+- A free [SerpAPI](https://serpapi.com/users/sign_up) key (100 searches/month on the free tier)
 
 ## Installation
 
@@ -21,11 +22,11 @@ This Python script automates the process of scraping job postings from Google Jo
 Start by cloning the repository to your local machine:
 
 ```bash
-git clone https://github.com/axsddlr/google_jobs_scraper.git
+git clone https://github.com/ankhanhtran02/Job_Scraper.git
 cd google_jobs_scraper
 ```
 
-Replace `https://github.com/axsddlr/google_jobs_scraper.git` with the actual URL of your repository and `google_jobs_scraper` with the name of the folder where you cloned the repository.
+Replace `https://github.com/ankhanhtran02/Job_Scraper.git` with the actual URL of your repository and `google_jobs_scraper` with the name of the folder where you cloned the repository.
 
 ### 2. Create a Virtual Environment (Optional but Recommended)
 
@@ -53,37 +54,45 @@ Install the required dependencies using pip:
 pip install -r requirements.txt
 ```
 
-This command will install all the necessary Python packages listed in `requirements.txt`, including Playwright.
+### 4. Set your SerpAPI key
 
-### 4. Install Playwright Browsers
-
-After installing the Playwright package, run the following command to install the required browsers:
+Get a free key at <https://serpapi.com/users/sign_up>, then add it to a `.env` file in the project root:
 
 ```bash
-playwright install
+echo 'SERPAPI_KEY=your_key_here' > .env
 ```
+
+The `.env` file is automatically loaded by `main.py` — no need to export anything or pass `--api_key` at runtime. It is already excluded from git via `.gitignore`.
 
 ## Usage
 
-To run the script, use the following command:
+To run the script:
 
 ```bash
-python google_jobs.py --search_term="Your Search Term" --limit=Number of Jobs to Scrape --is_today=Boolean to Filter Jobs Posted Today
+python main.py --search_term="Your Search Term" --limit=50 --city_state "City"
 ```
 
-Replace:
+### All options
 
-- `Your Search Term` with the job title or keywords you're interested in (e.g., "software engineer").
-- `Number of Jobs to Scrape` with the maximum number of jobs you want to scrape (e.g., `50`).
-- `Boolean to Filter Jobs Posted Today` with `True` if you only want to scrape jobs posted today, otherwise `False`.
+| Flag | Default | Description |
+|---|---|---|
+| `--search_term` | *(required)* | Job title / keywords |
+| `--limit` | `50` | Max number of jobs to fetch |
+| `--city_state` | — | Location (e.g. `"Hanoi"`, `"New York, NY"`) |
+| `--is_today` | `False` | Only return jobs posted today |
+| `--hl` | `en` | Language code (`vi` for Vietnamese, etc.) |
+| `--gl` | — | Country code (`vn`, `us`, …) |
+| `--api_key` | `$SERPAPI_KEY` | Override the key from `.env` at runtime |
 
-### Example
+### Examples
 
 ```bash
-python google_jobs.py --search_term="data scientist" --limit=100 --is_today=False
-```
+# English search, no location filter
+python main.py --search_term="data scientist" --limit=100
 
-This command scrapes up to 100 data scientist job postings from Google Jobs, including those posted before today.
+# Vietnamese internships in Hanoi
+python main.py --search_term="thực tập sinh" --limit=50 --city_state "Hà Nội" --hl=vi
+```
 
 ## Output
 
